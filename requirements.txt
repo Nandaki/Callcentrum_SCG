@@ -1,0 +1,13 @@
+# GUI Framework
+pyside6>=6.6.0
+
+# Google Sheets & OAuth
+gspread>=6.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.2.0
+
+# Wi-Fi ADB QR Code & mDNS Discovery
+qrcode>=8.0.0
+pillow>=10.0.0
+zeroconf>=0.130.0

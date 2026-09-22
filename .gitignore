@@ -1,0 +1,23 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Credentials & local secrets
+credentials/
+*.json
+!config/settings.example.json
+.env
+
+# User data & logs
+*.log
+config/settings.json
+.directory
+.DS_Store
+
