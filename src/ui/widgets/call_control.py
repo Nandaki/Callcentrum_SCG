@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -12,20 +11,14 @@ from PySide6.QtWidgets import (
 )
 
 from ...models.school import CallState
-from ..theme import (
-    SCG_BLUE,
-    SCG_DARK_BLUE,
-    SCG_GREEN,
-    SCG_RED,
-    TEXT_ON_BLUE,
-    TEXT_ON_DARK_BLUE,
-    TEXT_ON_GREEN,
-    TEXT_ON_RED,
-)
+from ..theme import theme_manager
 
 
 class CallControlWidget(QWidget):
-    """Panel pro řízení hovoru, 30s odpočet a tlačítka Volat / Spojeno / Zavěsit."""
+    """
+    Panel pro řízení hovoru ve stylu Linear.
+    Poskytuje přesný digitální odpočet, živou stavovou tečku a jasnou hierarchii akcí.
+    """
 
     call_requested = Signal()
     connected_requested = Signal()
@@ -43,153 +36,181 @@ class CallControlWidget(QWidget):
         self._timer.timeout.connect(self._on_timer_tick)
 
         self._setup_ui()
+        self._apply_theme()
         self._update_state_ui()
+        theme_manager.theme_changed.connect(self._apply_theme)
 
     def _setup_ui(self) -> None:
-        group = QGroupBox("Řízení hovoru")
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(group)
-
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(18, 18, 18, 18)
+        self.setObjectName("callControlRoot")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(14)
 
-        # Stavový pruh
+        # 1. Horní řádek: Stavová tečka & Digitální časovač
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        # Stavová sekce s živou tečkou
         status_box = QHBoxLayout()
-        lbl_prefix = QLabel("Stav:")
-        lbl_prefix.setStyleSheet(f"font-size: 14px; color: {SCG_DARK_BLUE}; font-weight: bold;")
-        self.lbl_status = QLabel("Připraveno")
-        self.lbl_status.setStyleSheet("font-size: 15px; font-weight: 800; color: #0d5f43;")
-        status_box.addWidget(lbl_prefix)
-        status_box.addWidget(self.lbl_status)
+        status_box.setSpacing(8)
+
+        self.lbl_status_dot = QLabel("●")
+        self.lbl_status_dot.setObjectName("statusDot")
+        status_box.addWidget(self.lbl_status_dot)
+
+        self.lbl_status_text = QLabel("Připraveno")
+        self.lbl_status_text.setObjectName("statusText")
+        status_box.addWidget(self.lbl_status_text)
         status_box.addStretch()
 
-        # Digitální časovač
-        self.lbl_timer = QLabel(f"{self.timeout_seconds} s")
-        self.lbl_timer.setStyleSheet(
-            f"font-size: 26px; font-weight: 900; color: {SCG_DARK_BLUE}; "
-            f"background-color: #edf5fd; padding: 4px 18px; border-radius: 8px; border: 2px solid {SCG_BLUE};"
-        )
+        top_row.addLayout(status_box)
+
+        # Digitální časovač (monospace)
+        self.lbl_timer = QLabel("00:30")
+        self.lbl_timer.setObjectName("timerText")
         self.lbl_timer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_box.addWidget(self.lbl_timer)
+        top_row.addWidget(self.lbl_timer)
 
-        layout.addLayout(status_box)
+        layout.addLayout(top_row)
 
-        # Progress bar odpočtu
+        # 2. Jemný tenký progress bar (3px)
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("callProgressBar")
         self.progress_bar.setRange(0, self.timeout_seconds)
         self.progress_bar.setValue(self.timeout_seconds)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(12)
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: #e2e8f0;
-                border-radius: 6px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {SCG_BLUE};
-                border-radius: 6px;
-            }}
-        """)
+        self.progress_bar.setFixedHeight(4)
         layout.addWidget(self.progress_bar)
 
-        # Tlačítka akcí (s použitím SCG barev a vysokého kontrastu)
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(12)
+        # 3. Akční tlačítka (Ergonomie: Primární vs Sekundární)
+        self.btn_layout = QHBoxLayout()
+        self.btn_layout.setSpacing(10)
 
-        # 1. Volat (Zelená SCG #5dd0a6)
-        self.btn_call = QPushButton("📞  VOLAT")
-        self.btn_call.setFixedHeight(52)
+        # Tlačítko 1: Volat
+        self.btn_call = QPushButton("Volat  [Mezerník]")
+        self.btn_call.setObjectName("btnCall")
+        self.btn_call.setFixedHeight(46)
         self.btn_call.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_call.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SCG_GREEN};
-                color: {TEXT_ON_GREEN};
-                font-size: 16px;
-                font-weight: 900;
-                border-radius: 8px;
-                border: none;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background-color: #4bc498;
-            }}
-            QPushButton:disabled {{
-                background-color: #e2e8f0;
-                color: #94a3b8;
-            }}
-        """)
         self.btn_call.clicked.connect(self._on_call_clicked)
-        btn_layout.addWidget(self.btn_call, stretch=2)
+        self.btn_layout.addWidget(self.btn_call, stretch=2)
 
-        # 2. Spojeno (Modrá SCG #5d9be6)
-        self.btn_connected = QPushButton("✅  SPOJENO")
-        self.btn_connected.setFixedHeight(52)
+        # Tlačítko 2: Spojeno
+        self.btn_connected = QPushButton("Spojeno  [Mezerník]")
+        self.btn_connected.setObjectName("btnConnected")
+        self.btn_connected.setFixedHeight(46)
         self.btn_connected.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_connected.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SCG_BLUE};
-                color: {TEXT_ON_BLUE};
-                font-size: 16px;
-                font-weight: 900;
-                border-radius: 8px;
-                border: none;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background-color: #4a8cd9;
-            }}
-            QPushButton:disabled {{
-                background-color: #e2e8f0;
-                color: #94a3b8;
-            }}
-        """)
         self.btn_connected.clicked.connect(self._on_connected_clicked)
-        btn_layout.addWidget(self.btn_connected, stretch=2)
+        self.btn_layout.addWidget(self.btn_connected, stretch=2)
 
-        # 3. Zavěsit (Červená SCG #ff7f7f)
-        self.btn_hangup = QPushButton("🛑  ZAVĚSIT")
-        self.btn_hangup.setFixedHeight(52)
+        # Tlačítko 3: Zavěsit
+        self.btn_hangup = QPushButton("Zavěsit  [Esc]")
+        self.btn_hangup.setObjectName("btnHangup")
+        self.btn_hangup.setFixedHeight(46)
         self.btn_hangup.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_hangup.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SCG_RED};
-                color: {TEXT_ON_RED};
-                font-size: 16px;
-                font-weight: 900;
+        self.btn_hangup.clicked.connect(self._on_hangup_clicked)
+        self.btn_layout.addWidget(self.btn_hangup, stretch=2)
+
+        layout.addLayout(self.btn_layout)
+
+    def _apply_theme(self) -> None:
+        t = theme_manager.tokens
+
+        self.setStyleSheet(f"""
+            QWidget#callControlRoot {{
+                background-color: {t.bg_card};
+                border: 1px solid {t.border_card};
                 border-radius: 8px;
+            }}
+            QLabel#statusText {{
+                font-size: 14px;
+                font-weight: 600;
+                color: {t.text_primary};
+            }}
+            QLabel#timerText {{
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 22px;
+                font-weight: 700;
+                color: {t.text_primary};
+                background-color: {t.bg_card_secondary};
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                padding: 4px 14px;
+            }}
+            QProgressBar#callProgressBar {{
+                background-color: {t.bg_card_secondary};
+                border-radius: 2px;
                 border: none;
-                letter-spacing: 0.5px;
             }}
-            QPushButton:hover {{
-                background-color: #f76868;
+            QProgressBar#callProgressBar::chunk {{
+                background-color: {t.accent_blue};
+                border-radius: 2px;
             }}
-            QPushButton:disabled {{
-                background-color: #e2e8f0;
-                color: #94a3b8;
+            QPushButton#btnCall {{
+                background-color: {t.accent_green};
+                color: {t.bg_app if t.is_dark else '#ffffff'};
+                font-size: 14px;
+                font-weight: 700;
+                border-radius: 6px;
+                border: none;
+            }}
+            QPushButton#btnCall:hover {{
+                background-color: {'#6fe2b7' if t.is_dark else '#047857'};
+            }}
+            QPushButton#btnCall:disabled {{
+                background-color: {t.bg_card_secondary};
+                color: {t.text_dimmed};
+                border: 1px solid {t.border_subtle};
+            }}
+            QPushButton#btnConnected {{
+                background-color: {t.accent_blue};
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 700;
+                border-radius: 6px;
+                border: none;
+            }}
+            QPushButton#btnConnected:hover {{
+                background-color: {'#75acf0' if t.is_dark else '#1d4ed8'};
+            }}
+            QPushButton#btnConnected:disabled {{
+                background-color: {t.bg_card_secondary};
+                color: {t.text_dimmed};
+                border: 1px solid {t.border_subtle};
+            }}
+            QPushButton#btnHangup {{
+                background-color: {t.bg_card_secondary};
+                color: {t.accent_red};
+                font-size: 14px;
+                font-weight: 700;
+                border-radius: 6px;
+                border: 1px solid {t.border_subtle};
+            }}
+            QPushButton#btnHangup:hover {{
+                background-color: {t.accent_red};
+                color: #ffffff;
+                border: none;
+            }}
+            QPushButton#btnHangup:disabled {{
+                background-color: {t.bg_card_secondary};
+                color: {t.text_dimmed};
+                border: 1px solid {t.border_subtle};
             }}
         """)
-        self.btn_hangup.clicked.connect(self._on_hangup_clicked)
-        btn_layout.addWidget(self.btn_hangup, stretch=2)
 
-        layout.addLayout(btn_layout)
+        self._update_timer_display()
+        self._update_state_ui()
 
     def _on_call_clicked(self) -> None:
-        # Přepneme do stavu DIALING ale BEZ spuštění timeru.
-        # Timer se spustí až po potvrzení, že hovor byl skutečně zahájen (start_dialing).
         self.state = CallState.DIALING
         self._update_state_ui()
-        self.lbl_status.setText("Vytáčím...")
-        self.lbl_status.setStyleSheet("font-size: 15px; font-weight: 800; color: #b45309;")
-        # Zakážeme VOLAT hned, aby se nedalo kliknout dvakrát
+        self.lbl_status_text.setText("Vytáčím hovor...")
         self.btn_call.setEnabled(False)
         self.btn_connected.setEnabled(False)
         self.btn_hangup.setEnabled(False)
         self.call_requested.emit()
 
     def start_dialing(self) -> None:
-        """Zavolá se z MainWindow PO úspěšném zahájení hovoru – spustí 30s odpočet."""
+        """Spustí odpočet po potvrzení zahájení vytáčení."""
         self.state = CallState.DIALING
         self.remaining_seconds = self.timeout_seconds
         self._update_timer_display()
@@ -197,11 +218,12 @@ class CallControlWidget(QWidget):
         self._update_state_ui()
 
     def dial_failed(self, error_msg: str) -> None:
-        """Zavolá se z MainWindow pokud hovor SELHAL – vrátí se do IDLE a zobrazí chybu."""
+        """Vrátí do IDLE po chybě vytáčení."""
         self._timer.stop()
         self.state = CallState.IDLE
-        self.lbl_status.setText(f"❌ {error_msg}")
-        self.lbl_status.setStyleSheet("font-size: 14px; font-weight: 800; color: #dc2626;")
+        self.lbl_status_text.setText(f"Chyba: {error_msg}")
+        t = theme_manager.tokens
+        self.lbl_status_dot.setStyleSheet(f"color: {t.accent_red}; font-size: 14px;")
         self.btn_call.setEnabled(True)
         self.btn_connected.setEnabled(False)
         self.btn_hangup.setEnabled(False)
@@ -221,40 +243,48 @@ class CallControlWidget(QWidget):
 
         if self.remaining_seconds == 0:
             self._timer.stop()
-            self.lbl_status.setText("Čas vypršel (30s timeout)")
-            self.lbl_status.setStyleSheet(f"font-size: 15px; font-weight: 800; color: {TEXT_ON_RED};")
+            self.lbl_status_text.setText("Limit vypršel (30 s)")
             self.set_state(CallState.COMPLETED)
             self.timeout_reached.emit()
 
     def _update_timer_display(self) -> None:
-        self.lbl_timer.setText(f"{self.remaining_seconds} s")
+        mins = self.remaining_seconds // 60
+        secs = self.remaining_seconds % 60
+        self.lbl_timer.setText(f"{mins:02d}:{secs:02d}")
         self.progress_bar.setValue(self.remaining_seconds)
 
+        t = theme_manager.tokens
         if self.remaining_seconds <= 5:
-            color = SCG_RED
-            text_color = TEXT_ON_RED
-            bg = "#fff1f1"
+            bar_color = t.accent_red
+            timer_text_color = t.accent_red
         elif self.remaining_seconds <= 12:
-            color = "#f59e0b"
-            text_color = "#92400e"
-            bg = "#fffbeb"
+            bar_color = t.accent_amber
+            timer_text_color = t.accent_amber
         else:
-            color = SCG_BLUE
-            text_color = SCG_DARK_BLUE
-            bg = "#edf5fd"
+            bar_color = t.accent_blue
+            timer_text_color = t.text_primary
 
-        self.lbl_timer.setStyleSheet(
-            f"font-size: 26px; font-weight: 900; color: {text_color}; "
-            f"background-color: {bg}; padding: 4px 18px; border-radius: 8px; border: 2px solid {color};"
-        )
         self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: #e2e8f0;
-                border-radius: 6px;
+            QProgressBar#callProgressBar {{
+                background-color: {t.bg_card_secondary};
+                border-radius: 2px;
+                border: none;
             }}
-            QProgressBar::chunk {{
-                background-color: {color};
+            QProgressBar#callProgressBar::chunk {{
+                background-color: {bar_color};
+                border-radius: 2px;
+            }}
+        """)
+        self.lbl_timer.setStyleSheet(f"""
+            QLabel#timerText {{
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 22px;
+                font-weight: 700;
+                color: {timer_text_color};
+                background-color: {t.bg_card_secondary};
+                border: 1px solid {t.border_subtle};
                 border-radius: 6px;
+                padding: 4px 14px;
             }}
         """)
 
@@ -270,9 +300,11 @@ class CallControlWidget(QWidget):
         self._update_state_ui()
 
     def _update_state_ui(self) -> None:
+        t = theme_manager.tokens
+
         if self.state == CallState.IDLE:
-            self.lbl_status.setText("Připraveno k hovoru")
-            self.lbl_status.setStyleSheet("font-size: 15px; font-weight: 800; color: #0d5f43;")
+            self.lbl_status_dot.setStyleSheet(f"color: {t.accent_green}; font-size: 14px;")
+            self.lbl_status_text.setText("Připraveno k hovoru")
             self.btn_call.setEnabled(True)
             self.btn_connected.setEnabled(False)
             self.btn_hangup.setEnabled(False)
@@ -280,23 +312,23 @@ class CallControlWidget(QWidget):
             self._update_timer_display()
 
         elif self.state == CallState.DIALING:
-            self.lbl_status.setText("Vyzvánění (čeká se na zvednutí)...")
-            self.lbl_status.setStyleSheet(f"font-size: 15px; font-weight: 800; color: #b45309;")
+            self.lbl_status_dot.setStyleSheet(f"color: {t.accent_amber}; font-size: 14px;")
+            self.lbl_status_text.setText("Vyzvánění (čeká na zvednutí)...")
             self.btn_call.setEnabled(False)
             self.btn_connected.setEnabled(True)
             self.btn_hangup.setEnabled(True)
 
         elif self.state == CallState.CONNECTED:
-            self.lbl_status.setText("Hovor probíhá (spojeno)")
-            self.lbl_status.setStyleSheet(f"font-size: 15px; font-weight: 800; color: {SCG_DARK_BLUE};")
+            self.lbl_status_dot.setStyleSheet(f"color: {t.accent_blue}; font-size: 14px;")
+            self.lbl_status_text.setText("Hovor probíhá (spojeno)")
             self.btn_call.setEnabled(False)
             self.btn_connected.setEnabled(False)
             self.btn_hangup.setEnabled(True)
 
         elif self.state == CallState.COMPLETED:
+            self.lbl_status_dot.setStyleSheet(f"color: {t.text_muted}; font-size: 14px;")
             if self.remaining_seconds > 0:
-                self.lbl_status.setText("Hovor ukončen")
-                self.lbl_status.setStyleSheet("font-size: 15px; font-weight: 800; color: #475569;")
+                self.lbl_status_text.setText("Hovor ukončen")
             self.btn_call.setEnabled(True)
             self.btn_connected.setEnabled(False)
             self.btn_hangup.setEnabled(False)
@@ -305,4 +337,3 @@ class CallControlWidget(QWidget):
         """Resetuje panel do výchozího stavu."""
         self._timer.stop()
         self.set_state(CallState.IDLE)
-

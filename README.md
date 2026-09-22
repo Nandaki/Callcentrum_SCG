@@ -1,6 +1,6 @@
 # Call Centrum — SCG
 
-Interní desktopová aplikace pro operátory call centra Student Cyber Games (Prezentiáda, pIšQworky). Slouží k rychlému obvolávání škol, evidenci výsledků hovorů a automatickému zápisu do sdílených Google tabulek.
+Interní desktopová aplikace pro operátory call centra Students Can Grow (Prezentiáda, pIšQworky). Slouží k rychlému obvolávání škol, evidenci výsledků hovorů a automatickému zápisu do sdílených Google tabulek.
 
 Aplikace se bezdrátově propojuje s telefonem s Androidem přes Wi-Fi (ADB) a umožňuje vytáčet hovory a odesílat automatické SMS zprávy při nezastižení bez nutnosti sahat na telefon.
 
@@ -125,6 +125,6 @@ callcetrum/
 ---
 
 ## Licence
-
-Interní nástroj vyvinutý pro potřeby studentských soutěží spolku Student Cyber Games.
+ 
+Interní nástroj vyvinutý pro potřeby studentských projektů organizace Students Can Grow.
 

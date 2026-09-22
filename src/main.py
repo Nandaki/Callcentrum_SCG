@@ -25,14 +25,19 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Call Centrum")
-    app.setApplicationDisplayName("Call Centrum — Prezentiáda & pIšQworky")
+    app.setApplicationDisplayName("Call Centrum — Students Can Grow")
 
     # Nastavení čistého systémového fontu
-    font = QFont("Noto Sans", 10)
+    font = QFont("Inter", 10)
+    font.setStyleHint(QFont.StyleHint.SansSerif)
     app.setFont(font)
 
     # Načtení konfigurace
     config = AppConfig.load()
+
+    from src.ui.theme import theme_manager
+    theme_manager.set_theme(getattr(config, "theme_mode", "dark") or "dark")
+    app.setStyleSheet(theme_manager.get_stylesheet())
 
     # Vytvoření a zobrazení hlavního okna
     window = MainWindow(config)

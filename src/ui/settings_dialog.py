@@ -44,6 +44,7 @@ from .theme import (
     TEXT_ON_DARK_BLUE,
     TEXT_ON_GREEN,
     TEXT_ON_RED,
+    theme_manager,
 )
 
 
@@ -197,73 +198,31 @@ class SheetsWorker(QObject):
             self.finished.emit()
 
 
-CARD_STYLE = f"""
-    QGroupBox {{
-        background-color: #ffffff;
-        border: 1.5px solid #e2e8f0;
-        border-radius: 12px;
-        margin-top: 14px;
-        padding: 22px 20px 20px 20px;
-        font-size: 14px;
-        font-weight: 800;
-        color: {SCG_DARK_BLUE};
-    }}
-    QGroupBox::title {{
-        subcontrol-origin: margin;
-        subcontrol-position: top left;
-        left: 16px;
-        padding: 0 8px;
-        background-color: #f8fafc;
-        border-radius: 4px;
-    }}
-"""
+def get_card_style() -> str:
+    t = theme_manager.tokens
+    return f"""
+        QGroupBox {{
+            background-color: {t.bg_card};
+            border: 1px solid {t.border_card};
+            border-radius: 8px;
+            margin-top: 14px;
+            padding: 20px 16px 16px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            color: {t.text_primary};
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 14px;
+            padding: 0 6px;
+            background-color: {t.bg_card};
+            color: {t.text_secondary};
+            border-radius: 4px;
+        }}
+    """
 
-INPUT_STYLE = """
-    QLineEdit, QComboBox, QSpinBox, QTextEdit {
-        background-color: #ffffff;
-        color: #1e293b;
-        border: 1.5px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 7px 12px;
-        font-size: 13px;
-        min-height: 24px;
-    }
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTextEdit:focus {
-        border-color: #5d9be6;
-        background-color: #ffffff;
-    }
-    QComboBox::drop-down {
-        border: none;
-        width: 24px;
-    }
-"""
-
-TAB_STYLE = f"""
-    QTabWidget::pane {{
-        border: 1.5px solid #cbd5e1;
-        border-radius: 10px;
-        background-color: #f8fafc;
-        top: -1px;
-    }}
-    QTabBar::tab {{
-        background-color: #e2e8f0;
-        color: #475569;
-        font-size: 13px;
-        font-weight: 800;
-        padding: 10px 20px;
-        margin-right: 4px;
-        border-top-left-radius: 8px;
-        border-top-right-radius: 8px;
-    }}
-    QTabBar::tab:selected {{
-        background-color: {SCG_DARK_BLUE};
-        color: #ffffff;
-    }}
-    QTabBar::tab:hover:!selected {{
-        background-color: #cbd5e1;
-        color: #1e293b;
-    }}
-"""
+CARD_STYLE = ""  # Replaced by get_card_style()
 
 
 class GlobalSettingsDialog(QDialog):
@@ -292,13 +251,14 @@ class GlobalSettingsDialog(QDialog):
         self.setWindowTitle("Nastavení aplikace — Call Centrum SCG")
         self.resize(860, 840)
         self.setMinimumSize(720, 620)
-        self.setStyleSheet(f"background-color: #f8fafc; {INPUT_STYLE} {TAB_STYLE}")
+        self.setStyleSheet(theme_manager.get_stylesheet())
 
         self._setup_ui()
         self.tab_widget.setCurrentIndex(initial_tab)
         self._load_all_values()
 
     def _setup_ui(self) -> None:
+        t = theme_manager.tokens
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 16, 20, 16)
         main_layout.setSpacing(14)
@@ -308,9 +268,9 @@ class GlobalSettingsDialog(QDialog):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         lbl_title = QLabel("⚙️ Globální nastavení Call Centra")
-        lbl_title.setStyleSheet(f"font-size: 20px; font-weight: 900; color: {SCG_DARK_BLUE};")
+        lbl_title.setStyleSheet(f"font-size: 18px; font-weight: 800; color: {t.text_primary};")
         lbl_desc = QLabel("Správa propojení s tabulkou, bezdrátového telefonu, automatických SMS a integrací.")
-        lbl_desc.setStyleSheet("font-size: 12px; color: #64748b;")
+        lbl_desc.setStyleSheet(f"font-size: 12px; color: {t.text_muted};")
         title_box.addWidget(lbl_title)
         title_box.addWidget(lbl_desc)
         header_box.addLayout(title_box)
@@ -357,39 +317,39 @@ class GlobalSettingsDialog(QDialog):
         btn_bar.setSpacing(12)
 
         btn_cancel = QPushButton("Zrušit / Zavřít")
-        btn_cancel.setFixedHeight(44)
+        btn_cancel.setFixedHeight(40)
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #ffffff;
-                color: #475569;
-                font-weight: bold;
-                border: 1.5px solid #cbd5e1;
-                border-radius: 8px;
-                padding: 0 20px;
-            }
-            QPushButton:hover {
-                background-color: #f1f5f9;
-                border-color: #94a3b8;
-            }
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t.btn_secondary_bg};
+                color: {t.btn_secondary_text};
+                font-weight: 600;
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+                padding: 0 18px;
+            }}
+            QPushButton:hover {{
+                background-color: {t.bg_hover};
+                border-color: {t.border_focus};
+            }}
         """)
         btn_cancel.clicked.connect(self.reject)
 
-        self.btn_save_all = QPushButton("💾  Uložit všechna nastavení")
-        self.btn_save_all.setFixedHeight(44)
+        self.btn_save_all = QPushButton("Uložit všechna nastavení")
+        self.btn_save_all.setFixedHeight(40)
         self.btn_save_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_all.setStyleSheet(f"""
             QPushButton {{
-                background-color: {SCG_DARK_BLUE};
-                color: {TEXT_ON_DARK_BLUE};
-                font-weight: 800;
-                font-size: 14px;
-                border-radius: 8px;
+                background-color: {t.btn_primary_bg};
+                color: {t.btn_primary_text};
+                font-weight: 700;
+                font-size: 13px;
+                border-radius: 6px;
                 border: none;
-                padding: 0 26px;
+                padding: 0 24px;
             }}
             QPushButton:hover {{
-                background-color: #282766;
+                background-color: {t.btn_primary_hover};
             }}
         """)
         self.btn_save_all.clicked.connect(self._save_all_settings)
@@ -412,17 +372,19 @@ class GlobalSettingsDialog(QDialog):
         layout.setContentsMargins(8, 8, 16, 8)
         layout.setSpacing(18)
 
+        t = theme_manager.tokens
+
         # Krok 1: OAuth
         g_auth = QGroupBox("Krok 1: Přihlášení přes Google účet (OAuth 2.0)")
-        g_auth.setStyleSheet(CARD_STYLE)
+        g_auth.setStyleSheet(get_card_style())
         auth_lay = QVBoxLayout(g_auth)
         auth_lay.setSpacing(12)
 
         st_box = QHBoxLayout()
         lbl_at = QLabel("Aktuální stav účtu:")
-        lbl_at.setStyleSheet(f"font-size: 13px; font-weight: 800; color: {SCG_DARK_BLUE};")
+        lbl_at.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {t.text_primary};")
         self.lbl_auth_status = QLabel("Zjišťuji stav...")
-        self.lbl_auth_status.setStyleSheet("font-size: 12px; font-weight: 800; padding: 4px 12px; border-radius: 6px; background-color: #f1f5f9; color: #64748b;")
+        self.lbl_auth_status.setStyleSheet(f"font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 6px; background-color: {t.bg_card_secondary}; color: {t.text_muted};")
         st_box.addWidget(lbl_at)
         st_box.addWidget(self.lbl_auth_status)
         st_box.addStretch()
@@ -431,7 +393,7 @@ class GlobalSettingsDialog(QDialog):
         self.btn_login = QPushButton("🔑  Přihlásit se přes Google účet (otevře prohlížeč)")
         self.btn_login.setFixedHeight(40)
         self.btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_login.setStyleSheet(f"background-color: {SCG_BLUE}; color: {TEXT_ON_BLUE}; font-weight: 800; border-radius: 8px; border: none;")
+        self.btn_login.setStyleSheet(f"background-color: {t.accent_blue}; color: #ffffff; font-weight: 700; border-radius: 6px; border: none;")
         self.btn_login.clicked.connect(self._run_google_login)
         auth_lay.addWidget(self.btn_login)
 
@@ -448,7 +410,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Krok 2: URL
         g_sheet = QGroupBox("Krok 2: Odkaz na Google Tabulku")
-        g_sheet.setStyleSheet(CARD_STYLE)
+        g_sheet.setStyleSheet(get_card_style())
         s_lay = QVBoxLayout(g_sheet)
         s_lay.setSpacing(12)
 
@@ -460,7 +422,7 @@ class GlobalSettingsDialog(QDialog):
         self.btn_load_worksheets = QPushButton("🔍  Načíst sešit a seznam listů")
         self.btn_load_worksheets.setFixedHeight(40)
         self.btn_load_worksheets.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_load_worksheets.setStyleSheet(f"background-color: {SCG_DARK_BLUE}; color: {TEXT_ON_DARK_BLUE}; font-weight: 800; border-radius: 8px; border: none;")
+        self.btn_load_worksheets.setStyleSheet(f"background-color: {t.btn_primary_bg}; color: {t.btn_primary_text}; font-weight: 700; border-radius: 6px; border: none;")
         self.btn_load_worksheets.clicked.connect(self._fetch_worksheets)
         s_lay.addWidget(self.btn_load_worksheets)
 
@@ -471,7 +433,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Krok 3: List a záhlaví
         g_ws = QGroupBox("Krok 3: Výběr listu a řádku se záhlavím")
-        g_ws.setStyleSheet(CARD_STYLE)
+        g_ws.setStyleSheet(get_card_style())
         ws_lay = QVBoxLayout(g_ws)
         ws_lay.setSpacing(12)
 
@@ -498,7 +460,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Krok 4: Mapování
         g_map = QGroupBox("Krok 4: Propojení sloupců tabulky s aplikací")
-        g_map.setStyleSheet(CARD_STYLE)
+        g_map.setStyleSheet(get_card_style())
         map_lay = QVBoxLayout(g_map)
         map_lay.setSpacing(12)
 
@@ -518,7 +480,7 @@ class GlobalSettingsDialog(QDialog):
         ]
         for key, lbl_txt in fields:
             lbl = QLabel(lbl_txt)
-            lbl.setStyleSheet(f"font-weight: 700; color: {SCG_DARK_BLUE}; font-size: 13px;")
+            lbl.setStyleSheet(f"font-weight: 600; color: {t.text_primary}; font-size: 13px;")
             cb = QComboBox()
             cb.setFixedHeight(34)
             cb.addItem("— Nevybráno —", "")
@@ -545,7 +507,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Karta 1: QR kód
         g_qr = QGroupBox("1. Spárování pomocí QR kódu (Doporučeno — nejrychlejší)")
-        g_qr.setStyleSheet(CARD_STYLE)
+        g_qr.setStyleSheet(get_card_style())
         qr_lay = QVBoxLayout(g_qr)
         qr_lay.setSpacing(12)
 
@@ -577,7 +539,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Karta 2: Ruční kód
         g_man = QGroupBox("2. Alternativa: Ruční spárování 6místným kódem")
-        g_man.setStyleSheet(CARD_STYLE)
+        g_man.setStyleSheet(get_card_style())
         man_lay = QVBoxLayout(g_man)
         man_lay.setSpacing(12)
 
@@ -606,7 +568,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Karta 3: Připojení
         g_conn = QGroupBox("3. Připojení telefonu (pokud již máte spárováno)")
-        g_conn.setStyleSheet(CARD_STYLE)
+        g_conn.setStyleSheet(get_card_style())
         c_lay = QVBoxLayout(g_conn)
         c_lay.setSpacing(12)
 
@@ -622,16 +584,17 @@ class GlobalSettingsDialog(QDialog):
         c_lay.addLayout(c_box)
 
         btn_conn = QPushButton("⚡  Připojit telefon přes Wi-Fi (ADB Connect)")
-        btn_conn.setFixedHeight(42)
+        btn_conn.setFixedHeight(40)
         btn_conn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_conn.setStyleSheet(f"background-color: {SCG_DARK_BLUE}; color: {TEXT_ON_DARK_BLUE}; font-weight: 800; border-radius: 8px; border: none;")
+        t = theme_manager.tokens
+        btn_conn.setStyleSheet(f"background-color: {t.btn_primary_bg}; color: {t.btn_primary_text}; font-weight: 700; border-radius: 6px; border: none;")
         btn_conn.clicked.connect(self._run_adb_connect)
         c_lay.addWidget(btn_conn)
         layout.addWidget(g_conn)
 
         # Karta 4: Stav
         g_st = QGroupBox("4. Aktuální stav ADB připojení")
-        g_st.setStyleSheet(CARD_STYLE)
+        g_st.setStyleSheet(get_card_style())
         st_lay = QVBoxLayout(g_st)
         st_lay.setSpacing(10)
 
@@ -671,7 +634,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Šablona SMS
         g_sms = QGroupBox("Šablona SMS zprávy při nezastižení (odesílá se přes ADB)")
-        g_sms.setStyleSheet(CARD_STYLE)
+        g_sms.setStyleSheet(get_card_style())
         sms_lay = QVBoxLayout(g_sms)
         sms_lay.setSpacing(12)
 
@@ -698,7 +661,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Test odeslání SMS
         g_test = QGroupBox("Otestovat odeslání SMS přes ADB na telefon")
-        g_test.setStyleSheet(CARD_STYLE)
+        g_test.setStyleSheet(get_card_style())
         test_lay = QVBoxLayout(g_test)
         test_lay.setSpacing(12)
 
@@ -725,7 +688,7 @@ class GlobalSettingsDialog(QDialog):
 
         # Časovač hovoru
         g_time = QGroupBox("Časový limit pro vyzvánění před odesláním SMS")
-        g_time.setStyleSheet(CARD_STYLE)
+        g_time.setStyleSheet(get_card_style())
         time_lay = QVBoxLayout(g_time)
         time_lay.setSpacing(10)
 
@@ -758,7 +721,7 @@ class GlobalSettingsDialog(QDialog):
 
         # KDE Connect
         g_kde = QGroupBox("KDE Connect (místní síť Wi-Fi)")
-        g_kde.setStyleSheet(CARD_STYLE)
+        g_kde.setStyleSheet(get_card_style())
         kde_lay = QVBoxLayout(g_kde)
         kde_lay.setSpacing(10)
 
@@ -781,7 +744,7 @@ class GlobalSettingsDialog(QDialog):
 
         # VoIP Odorik
         g_voip = QGroupBox("VoIP Zoiper (Slovenské hovory +421)")
-        g_voip.setStyleSheet(CARD_STYLE)
+        g_voip.setStyleSheet(get_card_style())
         voip_lay = QVBoxLayout(g_voip)
         voip_lay.setSpacing(10)
 

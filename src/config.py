@@ -21,6 +21,9 @@ class AppConfig:
     )
     smtp_user: str = "lalik@scg.cz"
 
+    # Vzhled a téma
+    theme_mode: str = "dark"
+
     # Google OAuth & Google Sheets
     google_sheet_url: str = ""
     google_sheet_id: str = ""
