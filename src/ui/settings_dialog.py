@@ -6,9 +6,10 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -34,6 +35,7 @@ from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
 from ..config import AppConfig
 from ..core.dialer import PhoneController
+from ..core.mailer import EmailSender
 from ..core.sheets import GoogleSheetsService, extract_spreadsheet_id
 from .theme import (
     SCG_BLUE,
@@ -225,6 +227,24 @@ def get_card_style() -> str:
 CARD_STYLE = ""  # Replaced by get_card_style()
 
 
+class AsyncBridge(QObject):
+    """Spolehlivý most pro bezpečné spouštění funkcí na hlavním UI vlákně z libovolného vlákna."""
+    sig_callback = Signal(object)
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self.sig_callback.connect(self._dispatch)
+
+    def _dispatch(self, fn) -> None:
+        try:
+            fn()
+        except Exception as e:
+            print(f"[AsyncBridge] Výjimka na UI vlákně: {e}", flush=True)
+
+    def run_on_ui(self, fn) -> None:
+        self.sig_callback.emit(fn)
+
+
 class GlobalSettingsDialog(QDialog):
     """Jednotný dialog pro globální nastavení aplikace (Google Sheets, Telefon & ADB, SMS, Integrace)."""
 
@@ -240,6 +260,7 @@ class GlobalSettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.phone = phone_controller
+        self.bridge = AsyncBridge(self)
         self.sheets_service = GoogleSheetsService(
             client_secret_path=config.oauth_client_secret_path,
             token_path=config.oauth_token_path,
@@ -293,7 +314,11 @@ class GlobalSettingsDialog(QDialog):
         self.tab_sms = self._create_sms_tab()
         self.tab_widget.addTab(self.tab_sms, "💬  SMS zprávy")
 
-        # 4. Záložka: Integrace & KDE
+        # 4. Záložka: E-maily & SMTP
+        self.tab_email = self._create_email_tab()
+        self.tab_widget.addTab(self.tab_email, "✉️  E-maily & SMTP")
+
+        # 5. Záložka: Integrace & KDE
         self.tab_integrations = self._create_integrations_tab()
         self.tab_widget.addTab(self.tab_integrations, "🔌  Integrace & Zařízení")
 
@@ -408,8 +433,30 @@ class GlobalSettingsDialog(QDialog):
         auth_lay.addLayout(file_box)
         layout.addWidget(g_auth)
 
-        # Krok 2: URL
-        g_sheet = QGroupBox("Krok 2: Odkaz na Google Tabulku")
+        # Krok 2: Operátor / Organizátor
+        g_op = QGroupBox("Krok 2: Moje identita operátora (sloupec Volá)")
+        g_op.setStyleSheet(get_card_style())
+        op_lay = QVBoxLayout(g_op)
+        op_lay.setSpacing(10)
+
+        op_desc = QLabel(
+            "Vyberte své jméno organizátora. Aplikace automaticky přeskočí školy, které má přiřazené jiný organizátor, "
+            "a při každém hovoru zapíše vaše jméno do sloupce „Volá“ a zaškrtne políčko „Zavoláno“."
+        )
+        op_desc.setWordWrap(True)
+        op_desc.setStyleSheet(f"font-size: 12px; color: {t.text_secondary}; line-height: 1.4;")
+        op_lay.addWidget(op_desc)
+
+        op_form = QFormLayout()
+        self.cmb_operator = QComboBox()
+        self.cmb_operator.setEditable(True)
+        self.cmb_operator.setFixedHeight(36)
+        op_form.addRow("Moje jméno organizátora:", self.cmb_operator)
+        op_lay.addLayout(op_form)
+        layout.addWidget(g_op)
+
+        # Krok 3: URL
+        g_sheet = QGroupBox("Krok 3: Odkaz na Google Tabulku")
         g_sheet.setStyleSheet(get_card_style())
         s_lay = QVBoxLayout(g_sheet)
         s_lay.setSpacing(12)
@@ -431,8 +478,8 @@ class GlobalSettingsDialog(QDialog):
         s_lay.addWidget(self.lbl_sheet_msg)
         layout.addWidget(g_sheet)
 
-        # Krok 3: List a záhlaví
-        g_ws = QGroupBox("Krok 3: Výběr listu a řádku se záhlavím")
+        # Krok 4: List a záhlaví
+        g_ws = QGroupBox("Krok 4: Výběr listu a řádku se záhlavím")
         g_ws.setStyleSheet(get_card_style())
         ws_lay = QVBoxLayout(g_ws)
         ws_lay.setSpacing(12)
@@ -458,8 +505,8 @@ class GlobalSettingsDialog(QDialog):
         ws_lay.addWidget(self.btn_load_columns)
         layout.addWidget(g_ws)
 
-        # Krok 4: Mapování
-        g_map = QGroupBox("Krok 4: Propojení sloupců tabulky s aplikací")
+        # Krok 5: Mapování
+        g_map = QGroupBox("Krok 5: Propojení sloupců tabulky s aplikací")
         g_map.setStyleSheet(get_card_style())
         map_lay = QVBoxLayout(g_map)
         map_lay.setSpacing(12)
@@ -468,14 +515,16 @@ class GlobalSettingsDialog(QDialog):
         self.mapping_form.setSpacing(10)
         self.combos: Dict[str, QComboBox] = {}
         fields = [
+            ("caller", "👤 Sloupec pro Jméno organizátora (Volá):"),
+            ("called", "☑️ Sloupec pro Checkbox (Zavoláno / Zav):"),
+            ("status", "📊 Sloupec pro Zápis výsledku hovoru (Stav):"),
+            ("operator_note", "✍️ Sloupec pro Zápis poznámky (Poznámky):"),
             ("name", "🏫 Název školy (*):"),
             ("phone", "📞 Telefon školy (*):"),
             ("city", "📍 Město / Adresa:"),
             ("contact_person", "👤 Kontaktní osoba:"),
             ("email", "✉️ E-mail školy:"),
             ("previous_notes", "📝 Historie a poznámky k hovoru:"),
-            ("status", "📊 Sloupec pro Zápis výsledku hovoru:"),
-            ("operator_note", "✍️ Sloupec pro Zápis nové poznámky:"),
             ("timestamp", "⏱️ Sloupec pro Zápis času volání:"),
         ]
         for key, lbl_txt in fields:
@@ -707,7 +756,196 @@ class GlobalSettingsDialog(QDialog):
         return scroll
 
     # --------------------------------------------------------
-    # TAB 4: Integrace & Zařízení
+    # TAB 4: E-maily & SMTP
+    # --------------------------------------------------------
+    def _create_email_tab(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(8, 8, 16, 8)
+        layout.setSpacing(18)
+
+        t = theme_manager.tokens
+
+        # 1. SMTP Připojení
+        g_smtp = QGroupBox("1. Nastavení SMTP serveru pro odesílání e-mailů")
+        g_smtp.setStyleSheet(get_card_style())
+        smtp_lay = QVBoxLayout(g_smtp)
+        smtp_lay.setSpacing(12)
+
+        lbl_smtp_info = QLabel(
+            "E-maily se odesílají z vašeho účtu přes zabezpečený protokol SMTP.<br>"
+            "Pro účty Google Workspace (např. <b>@scg.cz</b>) si v nastavení zabezpečení Google účtu "
+            "vytvořte <b>Heslo aplikace</b> (App Password)."
+        )
+        lbl_smtp_info.setStyleSheet("font-size: 12px; color: #64748b; line-height: 1.4;")
+        smtp_lay.addWidget(lbl_smtp_info)
+
+        s_form = QFormLayout()
+        s_form.setSpacing(10)
+
+        self.txt_smtp_host = QLineEdit(self.config.smtp_host or "smtp.gmail.com")
+        self.txt_smtp_host.setFixedHeight(36)
+        s_form.addRow("SMTP Server (host):", self.txt_smtp_host)
+
+        port_box = QHBoxLayout()
+        port_box.setSpacing(10)
+        self.spn_smtp_port = QSpinBox()
+        self.spn_smtp_port.setFixedHeight(36)
+        self.spn_smtp_port.setRange(1, 65535)
+        self.spn_smtp_port.setValue(self.config.smtp_port or 465)
+        port_box.addWidget(self.spn_smtp_port)
+
+        self.chk_smtp_ssl = QCheckBox("Použít SSL (port 465)")
+        self.chk_smtp_ssl.setChecked(bool(self.config.smtp_ssl))
+        port_box.addWidget(self.chk_smtp_ssl)
+        port_box.addStretch()
+        s_form.addRow("Port a zabezpečení:", port_box)
+
+        self.txt_smtp_user = QLineEdit(self.config.smtp_user or "lalik@scg.cz")
+        self.txt_smtp_user.setFixedHeight(36)
+        s_form.addRow("Uživatelský e-mail:", self.txt_smtp_user)
+
+        pwd_box = QHBoxLayout()
+        pwd_box.setSpacing(6)
+        self.txt_smtp_password = QLineEdit(self.config.smtp_password or "")
+        self.txt_smtp_password.setFixedHeight(36)
+        self.txt_smtp_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_smtp_password.setPlaceholderText("16místné Heslo aplikace (App Password)")
+        pwd_box.addWidget(self.txt_smtp_password, stretch=1)
+
+        btn_toggle_pwd = QPushButton("👁️")
+        btn_toggle_pwd.setFixedSize(36, 36)
+        btn_toggle_pwd.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_toggle_pwd.setToolTip("Zobrazit / skrýt heslo")
+        btn_toggle_pwd.clicked.connect(self._toggle_smtp_pwd_visibility)
+        pwd_box.addWidget(btn_toggle_pwd)
+
+        btn_get_app_pwd = QPushButton("🔑 Získat Heslo aplikace")
+        btn_get_app_pwd.setFixedHeight(36)
+        btn_get_app_pwd.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_get_app_pwd.setToolTip("Otevře v prohlížeči https://myaccount.google.com/apppasswords pro vygenerování 16místného hesla")
+        btn_get_app_pwd.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://myaccount.google.com/apppasswords")))
+        pwd_box.addWidget(btn_get_app_pwd)
+        s_form.addRow("Heslo aplikace (SMTP):", pwd_box)
+
+        self.txt_operator_phone = QLineEdit(getattr(self.config, "operator_phone", "+420 733 215 027") or "+420 733 215 027")
+        self.txt_operator_phone.setFixedHeight(36)
+        s_form.addRow("Telefon operátora do podpisu:", self.txt_operator_phone)
+
+        smtp_lay.addLayout(s_form)
+        layout.addWidget(g_smtp)
+
+        # 2. Testovací e-mail
+        g_test = QGroupBox("2. Otestovat odeslání e-mailu přes SMTP")
+        g_test.setStyleSheet(get_card_style())
+        test_lay = QVBoxLayout(g_test)
+        test_lay.setSpacing(12)
+
+        t_form = QFormLayout()
+        t_form.setSpacing(10)
+        self.txt_test_email = QLineEdit(self.config.smtp_user or "lalik@scg.cz")
+        self.txt_test_email.setFixedHeight(36)
+        self.txt_test_email.setPlaceholderText("zadejte svůj e-mail pro ověření")
+        t_form.addRow("E-mail pro doručení testu:", self.txt_test_email)
+        test_lay.addLayout(t_form)
+
+        btn_test_mail = QPushButton("📨  Odeslat testovací e-mail nyní")
+        btn_test_mail.setFixedHeight(40)
+        btn_test_mail.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_test_mail.setStyleSheet(f"background-color: {t.btn_primary_bg}; color: {t.btn_primary_text}; font-weight: 700; border-radius: 6px; border: none;")
+        btn_test_mail.clicked.connect(self._run_test_email)
+        test_lay.addWidget(btn_test_mail)
+
+        self.lbl_test_email_status = QLabel("")
+        self.lbl_test_email_status.setStyleSheet("font-size: 12px; font-weight: bold; color: #0284c7;")
+        test_lay.addWidget(self.lbl_test_email_status)
+
+        layout.addWidget(g_test)
+
+        # 3. Šablona e-mailu
+        g_tmpl = QGroupBox("3. Výchozí šablona e-mailu pro školy")
+        g_tmpl.setStyleSheet(get_card_style())
+        tmpl_lay = QVBoxLayout(g_tmpl)
+        tmpl_lay.setSpacing(10)
+
+        tmpl_info = QLabel("Proměnné: <code>{school_name}</code>, <code>{contact_person}</code>, <code>{city}</code>, <code>{operator_name}</code>, <code>{operator_email}</code>")
+        tmpl_info.setStyleSheet("font-size: 11px; color: #64748b;")
+        tmpl_lay.addWidget(tmpl_info)
+
+        tmpl_form = QFormLayout()
+        tmpl_form.setSpacing(10)
+
+        self.txt_email_subject = QLineEdit(self.config.email_subject_template or "Prezentiáda a pIšQworky – Podklady pro školu {school_name}")
+        self.txt_email_subject.setFixedHeight(36)
+        tmpl_form.addRow("Předmět e-mailu:", self.txt_email_subject)
+        tmpl_lay.addLayout(tmpl_form)
+
+        lbl_body_title = QLabel("Text zprávy:")
+        lbl_body_title.setStyleSheet("font-size: 12px; font-weight: 600;")
+        tmpl_lay.addWidget(lbl_body_title)
+
+        self.txt_email_body = QTextEdit()
+        self.txt_email_body.setFixedHeight(180)
+        self.txt_email_body.setText(self.config.email_body_template or "")
+        tmpl_lay.addWidget(self.txt_email_body)
+
+        layout.addWidget(g_tmpl)
+
+        scroll.setWidget(container)
+        return scroll
+
+    def _toggle_smtp_pwd_visibility(self) -> None:
+        if self.txt_smtp_password.echoMode() == QLineEdit.EchoMode.Password:
+            self.txt_smtp_password.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.txt_smtp_password.setEchoMode(QLineEdit.EchoMode.Password)
+
+    def _run_test_email(self) -> None:
+        to_email = self.txt_test_email.text().strip()
+        if not to_email:
+            self.lbl_test_email_status.setText("Chyba: Zadejte e-mail pro test.")
+            return
+
+        temp_cfg = AppConfig(
+            smtp_host=self.txt_smtp_host.text().strip(),
+            smtp_port=self.spn_smtp_port.value(),
+            smtp_ssl=self.chk_smtp_ssl.isChecked(),
+            smtp_user=self.txt_smtp_user.text().strip(),
+            smtp_password=self.txt_smtp_password.text().strip(),
+            operator_name=self.config.operator_name,
+            operator_phone=self.txt_operator_phone.text().strip(),
+        )
+        sender = EmailSender(temp_cfg)
+        self.lbl_test_email_status.setText("Odesílám testovací e-mail...")
+
+        def do_send():
+            html_body = sender.get_html_template()
+            formatted_html = sender.format_template(html_body, operator_name=temp_cfg.operator_name)
+            ok, msg = sender.send_email_smtp(
+                to_email=to_email,
+                subject="Testovací zpráva — Call Centrum SCG (pIšQworky)",
+                body=formatted_html,
+                html_body=formatted_html,
+            )
+            self.bridge.run_on_ui(lambda: self._on_test_email_done(ok, msg))
+
+        import threading
+        threading.Thread(target=do_send, daemon=True).start()
+
+    def _on_test_email_done(self, ok: bool, msg: str) -> None:
+        t = theme_manager.tokens
+        self.lbl_test_email_status.setText(msg)
+        if ok:
+            self.lbl_test_email_status.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {t.accent_green_text};")
+        else:
+            self.lbl_test_email_status.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {t.accent_red};")
+
+    # --------------------------------------------------------
+    # TAB 5: Integrace & Zařízení
     # --------------------------------------------------------
     def _create_integrations_tab(self) -> QWidget:
         scroll = QScrollArea()
@@ -773,6 +1011,12 @@ class GlobalSettingsDialog(QDialog):
         self.lbl_sms_char_count.setText(f"{length} znaků ({sms_count} SMS zpráva/zprávy)")
 
     def _load_all_values(self) -> None:
+        # Operátor
+        if self.config.operator_name:
+            if self.cmb_operator.findText(self.config.operator_name) < 0:
+                self.cmb_operator.addItem(self.config.operator_name)
+            self.cmb_operator.setCurrentText(self.config.operator_name)
+
         # Sheets
         self.txt_sheet_url.setText(self.config.google_sheet_url or self.config.google_sheet_id)
         if self.config.worksheet_name:
@@ -784,6 +1028,48 @@ class GlobalSettingsDialog(QDialog):
         self._update_auth_ui()
         self._refresh_adb_status()
         self._start_qr_listener()
+        self._load_organizers_async()
+
+        # E-maily & SMTP
+        self.txt_smtp_host.setText(self.config.smtp_host or "smtp.gmail.com")
+        self.spn_smtp_port.setValue(self.config.smtp_port or 465)
+        self.chk_smtp_ssl.setChecked(bool(self.config.smtp_ssl))
+        self.txt_smtp_user.setText(self.config.smtp_user or "lalik@scg.cz")
+        self.txt_smtp_password.setText(self.config.smtp_password or "")
+        self.txt_operator_phone.setText(getattr(self.config, "operator_phone", "+420 733 215 027") or "+420 733 215 027")
+        self.txt_test_email.setText(self.config.smtp_user or "lalik@scg.cz")
+        self.txt_email_subject.setText(self.config.email_subject_template or "Pojďte se zapojit do pIšQworek")
+        self.txt_email_body.setText(self.config.email_body_template or "")
+
+    def _load_organizers_async(self) -> None:
+        """Načte seznam organizátorů z listu Tabulka na pozadí."""
+        url = self.txt_sheet_url.text().strip()
+        s_id = extract_spreadsheet_id(url)
+        if not s_id or not self.sheets_service.is_authenticated():
+            return
+
+        def fetch():
+            try:
+                names = self.sheets_service.get_organizer_names(s_id)
+                self.bridge.run_on_ui(lambda: self._on_organizers_loaded(names))
+            except Exception as e:
+                print(f"[Settings] Nelze načíst organizátory: {e}")
+
+        import threading
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _on_organizers_loaded(self, names: List[str]) -> None:
+        current = self.cmb_operator.currentText().strip() or self.config.operator_name
+        self.cmb_operator.clear()
+        for n in names:
+            self.cmb_operator.addItem(n)
+        if current:
+            idx = self.cmb_operator.findText(current)
+            if idx >= 0:
+                self.cmb_operator.setCurrentIndex(idx)
+            else:
+                self.cmb_operator.addItem(current)
+                self.cmb_operator.setCurrentText(current)
 
     def _update_auth_ui(self) -> None:
         if self.sheets_service.is_authenticated():
@@ -815,14 +1101,11 @@ class GlobalSettingsDialog(QDialog):
             try:
                 self.sheets_service.authenticate_interactive()
                 email = self.sheets_service.get_user_email() or "Google účet"
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._on_auth_done(email))
+                self.bridge.run_on_ui(lambda: self._on_auth_done(email))
             except Exception as e:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Chyba", str(e)))
+                self.bridge.run_on_ui(lambda: QMessageBox.critical(self, "Chyba", str(e)))
             finally:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.btn_login.setEnabled(True))
+                self.bridge.run_on_ui(lambda: self.btn_login.setEnabled(True))
 
         import threading
         threading.Thread(target=do_auth, daemon=True).start()
@@ -844,14 +1127,11 @@ class GlobalSettingsDialog(QDialog):
         def fetch():
             try:
                 ws = self.sheets_service.get_worksheets(s_id)
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._on_worksheets_loaded(ws))
+                self.bridge.run_on_ui(lambda: self._on_worksheets_loaded(ws))
             except Exception as e:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._on_sheet_error(str(e)))
+                self.bridge.run_on_ui(lambda: self._on_sheet_error(str(e)))
             finally:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.btn_load_worksheets.setEnabled(True))
+                self.bridge.run_on_ui(lambda: self.btn_load_worksheets.setEnabled(True))
 
         import threading
         threading.Thread(target=fetch, daemon=True).start()
@@ -865,6 +1145,7 @@ class GlobalSettingsDialog(QDialog):
             self.cmb_worksheets.setCurrentText(pref)
         self.lbl_sheet_msg.setText(f"✅ Nalezeno {len(sheets)} listů. Přejděte ke Kroku 3.")
         self.lbl_sheet_msg.setStyleSheet("font-size: 12px; font-weight: bold; color: #059669;")
+        self._load_organizers_async()
 
     def _fetch_headers(self) -> None:
         url = self.txt_sheet_url.text().strip()
@@ -882,14 +1163,11 @@ class GlobalSettingsDialog(QDialog):
         def fetch():
             try:
                 r_num, headers = self.sheets_service.get_headers(s_id, w_name, header_row=h_row)
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._on_headers_loaded(r_num, headers))
+                self.bridge.run_on_ui(lambda: self._on_headers_loaded(r_num, headers))
             except Exception as e:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._on_sheet_error(str(e)))
+                self.bridge.run_on_ui(lambda: self._on_sheet_error(str(e)))
             finally:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self.btn_load_columns.setEnabled(True))
+                self.bridge.run_on_ui(lambda: self.btn_load_columns.setEnabled(True))
 
         import threading
         threading.Thread(target=fetch, daemon=True).start()
@@ -914,6 +1192,8 @@ class GlobalSettingsDialog(QDialog):
 
     def _auto_detect_col(self, key: str, headers: List[str], cb: QComboBox) -> None:
         kw = {
+            "caller": ["volá", "vola", "organizátor", "operator"],
+            "called": ["zavoláno", "zavolano", "zav", "hotovo", "volano"],
             "name": ["nazev", "škola", "skola", "název školy"],
             "phone": ["telefon_skoly", "kontakt_telefon", "telefon", "mobil", "tel"],
             "city": ["mesto", "město", "obec", "adresa", "ulice"],
@@ -1007,8 +1287,7 @@ class GlobalSettingsDialog(QDialog):
 
         def pair():
             ok, msg = self.phone.pair_wireless(ip, port, code)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_manual_pair_done(ok, msg))
+            self.bridge.run_on_ui(lambda: self._on_manual_pair_done(ok, msg))
 
         import threading
         threading.Thread(target=pair, daemon=True).start()
@@ -1028,8 +1307,7 @@ class GlobalSettingsDialog(QDialog):
 
         def scan():
             ports = self.phone.scan_open_ports(ip)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_scan_done(ports))
+            self.bridge.run_on_ui(lambda: self._on_scan_done(ports))
 
         import threading
         threading.Thread(target=scan, daemon=True).start()
@@ -1051,8 +1329,7 @@ class GlobalSettingsDialog(QDialog):
 
         def conn():
             ok, msg = self.phone.connect_wireless(ip, port)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_connect_done(ok, msg))
+            self.bridge.run_on_ui(lambda: self._on_connect_done(ok, msg))
 
         import threading
         threading.Thread(target=conn, daemon=True).start()
@@ -1093,8 +1370,7 @@ class GlobalSettingsDialog(QDialog):
 
         def send():
             ok, msg = self.phone.send_sms_adb(number, text)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_test_sms_done(ok, msg))
+            self.bridge.run_on_ui(lambda: self._on_test_sms_done(ok, msg))
 
         import threading
         threading.Thread(target=send, daemon=True).start()
@@ -1139,6 +1415,7 @@ class GlobalSettingsDialog(QDialog):
         self.config.header_row = h_row
         self.config.column_mapping = mapping
         self.config.oauth_client_secret_path = self.txt_creds_path.text().strip()
+        self.config.operator_name = self.cmb_operator.currentText().strip()
 
         # 2. SMS & Timeout
         self.config.silent_sms_template = self.txt_sms_template.toPlainText().strip()
@@ -1149,6 +1426,16 @@ class GlobalSettingsDialog(QDialog):
         self.config.kdeconnect_device_name = self.txt_kde_name.text().strip()
         self.config.sip_domain = self.txt_sip_domain.text().strip()
         self.config.zoiper_package = self.txt_zoiper_pkg.text().strip()
+
+        # 4. E-maily & SMTP
+        self.config.smtp_host = self.txt_smtp_host.text().strip()
+        self.config.smtp_port = self.spn_smtp_port.value()
+        self.config.smtp_ssl = self.chk_smtp_ssl.isChecked()
+        self.config.smtp_user = self.txt_smtp_user.text().strip()
+        self.config.smtp_password = self.txt_smtp_password.text().strip()
+        self.config.operator_phone = self.txt_operator_phone.text().strip()
+        self.config.email_subject_template = self.txt_email_subject.text().strip()
+        self.config.email_body_template = self.txt_email_body.toPlainText().strip()
 
         self.config.save()
         self.config_updated.emit()

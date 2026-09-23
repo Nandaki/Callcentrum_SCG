@@ -100,10 +100,10 @@ DARK_TOKENS = ThemeTokens(
     border_subtle="#222631",
     border_card="#282d3b",
     border_focus="#5d9be6",
-    text_primary="#f3f4f6",
-    text_secondary="#94a3b8",
-    text_muted="#64748b",
-    text_dimmed="#475569",
+    text_primary="#ffffff",
+    text_secondary="#cbd5e1",
+    text_muted="#94a3b8",
+    text_dimmed="#64748b",
     kbd_bg="#1e222c",
     kbd_text="#cbd5e1",
     kbd_border="#333948",
@@ -185,12 +185,10 @@ def generate_stylesheet(t: ThemeTokens) -> str:
 QMainWindow, QDialog {{
     background-color: {t.bg_app};
     color: {t.text_primary};
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }}
 
 QWidget {{
     color: {t.text_primary};
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }}
 
 /* Typography defaults */

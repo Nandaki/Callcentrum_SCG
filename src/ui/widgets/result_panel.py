@@ -17,7 +17,7 @@ from ..theme import theme_manager
 
 
 class ResultTileButton(QPushButton):
-    """Segmentovaná dlaždice výsledku hovoru s kbd zkratkou."""
+    """Segmentovaná dlaždice výsledku hovoru."""
 
     def __init__(self, key_shortcut: str, text: str, result_type: CallResultType, parent: QWidget | None = None):
         super().__init__(parent)
@@ -27,20 +27,20 @@ class ResultTileButton(QPushButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(38)
-        self._update_text()
-
-    def _update_text(self) -> None:
-        self.setText(f"[{self.key_shortcut}]  {self.title_text}")
+        self.setText(self.title_text)
+        self.setToolTip(f"Klávesová zkratka: {self.key_shortcut}")
 
 
 class ResultPanelWidget(QWidget):
     """
-    Moderní panel pro zápis výsledku hovoru ve stylu Linear.
-    Využívá segmentované dlaždice s klávesovými zkratkami [1] až [5].
+    Panel pro zápis výsledku hovoru.
+    Čisté dlaždice bez rušivých závorek v popiscích, podpora klávesových zkratek 1-5 a Enter.
     """
 
     result_submitted = Signal(CallResult)
     send_sms_requested = Signal()
+    send_email_requested = Signal()
+    skip_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -52,24 +52,24 @@ class ResultPanelWidget(QWidget):
     def _setup_ui(self) -> None:
         self.setObjectName("resultPanelRoot")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(12)
 
-        # 1. Kicker nadpis: Výsledek hovoru
+        # 1. Nadpis sekce
         lbl_section = QLabel("VÝSLEDEK HOVORU")
         lbl_section.setObjectName("sectionKicker")
         layout.addWidget(lbl_section)
 
-        # 2. Segmentované dlaždice (QButtonGroup)
+        # 2. Segmentované dlaždice (čisté texty)
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
 
         tiles_data: List[Tuple[str, str, CallResultType]] = [
-            ("1", "Má zájem (zaslat podklady)", CallResultType.INTERESTED),
-            ("2", "Nemá zájem", CallResultType.NOT_INTERESTED),
-            ("3", "Nezastiženi (vypršel limit / SMS)", CallResultType.UNANSWERED),
-            ("4", "Zavolat později / jiný termín", CallResultType.CALL_LATER),
-            ("5", "Špatné číslo / Neexistuje", CallResultType.WRONG_NUMBER),
+            ("1", "Zaujali jsme", CallResultType.INTERESTED),
+            ("2", "Nezájem", CallResultType.NOT_INTERESTED),
+            ("3", "Asi ok", CallResultType.OK_MAYBE),
+            ("4", "Nedovoláno", CallResultType.UNANSWERED),
+            ("5", "Poslat mail", CallResultType.SEND_MAIL),
         ]
 
         tiles_layout = QVBoxLayout()
@@ -81,24 +81,39 @@ class ResultPanelWidget(QWidget):
             self.tiles.append(btn)
             tiles_layout.addWidget(btn)
 
+        self.btn_group.idClicked.connect(self._on_tile_clicked)
         layout.addLayout(tiles_layout)
 
-        # 3. Tlačítko pro odeslání SMS přes ADB
-        sms_layout = QVBoxLayout()
-        sms_layout.setSpacing(4)
+        # 3. Tlačítka pro odeslání zpráv (SMS & E-mail)
+        msg_layout = QVBoxLayout()
+        msg_layout.setSpacing(6)
 
-        self.btn_send_sms = QPushButton("Odeslat SMS škole přes ADB  [S]")
+        msg_btn_row = QHBoxLayout()
+        msg_btn_row.setSpacing(8)
+
+        self.btn_send_sms = QPushButton("💬 Odeslat SMS")
         self.btn_send_sms.setObjectName("btnSendSms")
         self.btn_send_sms.setFixedHeight(38)
         self.btn_send_sms.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_sms.setToolTip("Odeslat přednastavenou SMS přes telefon (klávesa S)")
         self.btn_send_sms.clicked.connect(self._on_send_sms_clicked)
-        sms_layout.addWidget(self.btn_send_sms)
+        msg_btn_row.addWidget(self.btn_send_sms, stretch=1)
+
+        self.btn_send_email = QPushButton("✉️ Odeslat e-mail")
+        self.btn_send_email.setObjectName("btnSendEmail")
+        self.btn_send_email.setFixedHeight(38)
+        self.btn_send_email.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_email.setToolTip("Odeslat podklady e-mailem škole (klávesa E nebo M)")
+        self.btn_send_email.clicked.connect(self._on_send_email_clicked)
+        msg_btn_row.addWidget(self.btn_send_email, stretch=1)
+
+        msg_layout.addLayout(msg_btn_row)
 
         self.lbl_sms_status = QLabel("")
         self.lbl_sms_status.setObjectName("smsStatus")
-        sms_layout.addWidget(self.lbl_sms_status)
+        msg_layout.addWidget(self.lbl_sms_status)
 
-        layout.addLayout(sms_layout)
+        layout.addLayout(msg_layout)
 
         # 4. Poznámka operátora
         lbl_note_section = QLabel("POZNÁMKA K HOVORU")
@@ -107,17 +122,31 @@ class ResultPanelWidget(QWidget):
 
         self.txt_note = QTextEdit()
         self.txt_note.setObjectName("txtNote")
-        self.txt_note.setPlaceholderText("Např. Paní zástupkyně je na poradě, zavolat zítra po 10:00...")
+        self.txt_note.setPlaceholderText("Poznámka k hovoru (např. volat zítra po 10:00)...")
         self.txt_note.setMaximumHeight(65)
         layout.addWidget(self.txt_note)
 
-        # 5. Hlavní akční tlačítko pro uložení výsledku
-        self.btn_submit = QPushButton("Uložit výsledek a načíst další školu  [Enter]")
+        # 5. Tlačítka pro přeskočení a uložení výsledku
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        self.btn_skip = QPushButton("Přeskočit")
+        self.btn_skip.setObjectName("btnSkip")
+        self.btn_skip.setFixedHeight(44)
+        self.btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_skip.setToolTip("Přeskočit tuto školu bez zápisu do tabulky")
+        self.btn_skip.clicked.connect(self.skip_requested.emit)
+        action_row.addWidget(self.btn_skip, stretch=1)
+
+        self.btn_submit = QPushButton("Uložit výsledek")
         self.btn_submit.setObjectName("btnSubmit")
         self.btn_submit.setFixedHeight(44)
         self.btn_submit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_submit.setToolTip("Uložit výsledek do tabulky a načíst další kontakt (klávesa Enter)")
         self.btn_submit.clicked.connect(self._on_submit_clicked)
-        layout.addWidget(self.btn_submit)
+        action_row.addWidget(self.btn_submit, stretch=2)
+
+        layout.addLayout(action_row)
 
     def _apply_theme(self) -> None:
         t = theme_manager.tokens
@@ -131,16 +160,16 @@ class ResultPanelWidget(QWidget):
             QLabel#sectionKicker {{
                 font-size: 11px;
                 font-weight: 700;
-                letter-spacing: 0.6px;
+                letter-spacing: 0.5px;
                 color: {t.text_muted};
             }}
             QPushButton[checkable="true"] {{
                 text-align: left;
-                padding-left: 12px;
+                padding-left: 14px;
                 font-size: 13px;
                 font-weight: 600;
                 background-color: {t.bg_card_secondary};
-                color: {t.text_secondary};
+                color: {t.text_primary};
                 border: 1px solid {t.border_subtle};
                 border-radius: 6px;
             }}
@@ -155,7 +184,7 @@ class ResultPanelWidget(QWidget):
                 border: 1.5px solid {t.accent_blue};
                 font-weight: 700;
             }}
-            QPushButton#btnSendSms {{
+            QPushButton#btnSendSms, QPushButton#btnSendEmail {{
                 background-color: {t.bg_card_secondary};
                 color: {t.text_primary};
                 font-size: 13px;
@@ -163,13 +192,13 @@ class ResultPanelWidget(QWidget):
                 border: 1px solid {t.border_subtle};
                 border-radius: 6px;
             }}
-            QPushButton#btnSendSms:hover {{
+            QPushButton#btnSendSms:hover, QPushButton#btnSendEmail:hover {{
                 background-color: {t.bg_hover};
                 border-color: {t.border_focus};
             }}
-            QPushButton#btnSendSms:disabled {{
+            QPushButton#btnSendSms:disabled, QPushButton#btnSendEmail:disabled {{
                 background-color: {t.bg_card_secondary};
-                color: {t.text_dimmed};
+                color: {t.text_muted};
                 border-color: {t.border_subtle};
             }}
             QLabel#smsStatus {{
@@ -188,6 +217,19 @@ class ResultPanelWidget(QWidget):
             }}
             QTextEdit#txtNote:focus {{
                 border: 1.5px solid {t.border_focus};
+            }}
+            QPushButton#btnSkip {{
+                background-color: {t.bg_card_secondary};
+                color: {t.text_secondary};
+                font-size: 13px;
+                font-weight: 600;
+                border: 1px solid {t.border_subtle};
+                border-radius: 6px;
+            }}
+            QPushButton#btnSkip:hover {{
+                background-color: {t.bg_hover};
+                color: {t.text_primary};
+                border-color: {t.border_focus};
             }}
             QPushButton#btnSubmit {{
                 background-color: {t.btn_primary_bg};
@@ -210,11 +252,18 @@ class ResultPanelWidget(QWidget):
                 break
 
     def select_timeout_default(self) -> None:
-        """Vybere výchozí stav pro timeout (Nezastiženi)."""
-        self.select_outcome_by_key("3")
+        """Vybere výchozí stav pro timeout (Nedovoláno)."""
+        self.select_outcome_by_key("4")
         t = theme_manager.tokens
         self.lbl_sms_status.setText("Odesílám automatickou SMS...")
         self.lbl_sms_status.setStyleSheet(f"color: {t.accent_amber}; font-size: 12px; font-weight: 600;")
+
+    def _on_tile_clicked(self, btn_id: int) -> None:
+        btn = self.btn_group.button(btn_id)
+        if btn and isinstance(btn, ResultTileButton) and btn.result_type == CallResultType.SEND_MAIL:
+            t = theme_manager.tokens
+            self.lbl_sms_status.setText("💡 Zvoleno 'Poslat mail' — připravte e-mail tlačítkem 'Odeslat e-mail' nebo klávesou M.")
+            self.lbl_sms_status.setStyleSheet(f"color: {t.accent_blue}; font-size: 12px; font-weight: 600;")
 
     def _on_send_sms_clicked(self) -> None:
         t = theme_manager.tokens
@@ -223,16 +272,29 @@ class ResultPanelWidget(QWidget):
         self.lbl_sms_status.setStyleSheet(f"color: {t.accent_amber}; font-size: 12px; font-weight: 600;")
         self.send_sms_requested.emit()
 
+    def _on_send_email_clicked(self) -> None:
+        self.send_email_requested.emit()
+
     def set_sms_result(self, ok: bool, msg: str) -> None:
         t = theme_manager.tokens
         self.btn_send_sms.setEnabled(True)
         if ok:
-            self.btn_send_sms.setText("SMS odeslána ✓  [S]")
+            self.btn_send_sms.setText("SMS odeslána ✓")
             self.lbl_sms_status.setText(msg)
-            self.lbl_sms_status.setStyleSheet(f"color: {t.accent_green}; font-size: 12px; font-weight: 600;")
+            self.lbl_sms_status.setStyleSheet(f"color: {t.accent_green_text}; font-size: 12px; font-weight: 600;")
         else:
-            self.btn_send_sms.setText("Zkusit poslat SMS znovu  [S]")
+            self.btn_send_sms.setText("Zkusit poslat SMS znovu")
             self.lbl_sms_status.setText(f"Chyba: {msg}")
+            self.lbl_sms_status.setStyleSheet(f"color: {t.accent_red}; font-size: 12px; font-weight: 600;")
+
+    def set_email_result(self, ok: bool, msg: str) -> None:
+        t = theme_manager.tokens
+        if ok:
+            self.btn_send_email.setText("E-mail odeslán ✓")
+            self.lbl_sms_status.setText(msg)
+            self.lbl_sms_status.setStyleSheet(f"color: {t.accent_green_text}; font-size: 12px; font-weight: 600;")
+        else:
+            self.lbl_sms_status.setText(f"Chyba e-mailu: {msg}")
             self.lbl_sms_status.setStyleSheet(f"color: {t.accent_red}; font-size: 12px; font-weight: 600;")
 
     def _on_submit_clicked(self) -> None:
@@ -259,5 +321,7 @@ class ResultPanelWidget(QWidget):
 
         self.txt_note.clear()
         self.lbl_sms_status.setText("")
-        self.btn_send_sms.setText("Odeslat SMS škole přes ADB  [S]")
+        self.btn_send_sms.setText("💬 Odeslat SMS")
         self.btn_send_sms.setEnabled(True)
+        self.btn_send_email.setText("✉️ Odeslat e-mail")
+        self.btn_send_email.setEnabled(True)

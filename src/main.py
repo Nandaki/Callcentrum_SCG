@@ -28,7 +28,7 @@ def main() -> int:
     app.setApplicationDisplayName("Call Centrum — Students Can Grow")
 
     # Nastavení čistého systémového fontu
-    font = QFont("Inter", 10)
+    font = QFont("Noto Sans", 10)
     font.setStyleHint(QFont.StyleHint.SansSerif)
     app.setFont(font)
 

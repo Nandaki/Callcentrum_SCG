@@ -10,11 +10,13 @@ Aplikace se bezdrátově propojuje s telefonem s Androidem přes Wi-Fi (ADB) a u
 
 - **Přímé volání přes telefon (Wi-Fi ADB):** Vytáčení hovorů přes mobilní síť (SIM) jedním kliknutím nebo stiskem mezerníku.
 - **Automatická SMS při nezastižení:** Pokud hovor do 30 sekund nikdo nezvedne, aplikace hovor automaticky zavěsí a pošle přednastavenou SMS. SMS lze odeslat i manuálně tlačítkem.
+- **E-maily s nabídkou:** Přímé odesílání HTML e-mailů školám přes SMTP (Google Workspace) s formátovaným podpisem a inline ikonami, nebo otevření ve výchozím poštovním klientovi.
 - **Obousměrná synchronizace s Google Sheets:**
   - Načítání kontaktů z vybraného listu tabulky (podpora vlastního řádku záhlaví a dynamického mapování sloupců).
   - Zápis výsledků hovoru (stav, poznámka, čas volání, odškrtnutí checkboxu).
 - **Párování přes QR kód:** Bezdrátové připojení telefonu přes Android Wireless Debugging (podpora skenování QR kódu nebo ručního zadání portu a kódu).
-- **Jednotné nastavení:** Přehledný konfigurační dialog pro Google OAuth, tabulku, Wi-Fi ADB, šablonu SMS a další integrace.
+- **Dark / Light režim:** Přepínání barevného schématu UI.
+- **Jednotné nastavení:** Přehledný konfigurační dialog pro Google OAuth, tabulku, Wi-Fi ADB, SMTP, šablonu SMS a další integrace.
 
 ---
 
@@ -99,20 +101,27 @@ Při prvním spuštění klikněte v horní liště na **⚙️ Globální nasta
 
 ```text
 callcetrum/
+├── assets/                     # Ikony aplikace a inline obrázky do e-mailového podpisu
 ├── config/
 │   ├── settings.example.json   # Vzorový konfigurační soubor
 │   └── settings.json           # Lokální konfigurace (v .gitignore)
 ├── credentials/                # Lokální OAuth tokeny a klíče (v .gitignore)
 ├── src/
+│   ├── config.py               # Konfigurace aplikace (AppConfig dataclass)
 │   ├── core/
 │   │   ├── dialer.py           # Řízení telefonu, hovory, ADB příkazy, SMS
+│   │   ├── mailer.py           # Odesílání e-mailů přes SMTP (HTML + inline ikony)
 │   │   └── sheets.py           # Google Sheets API a OAuth autentizace
 │   ├── models/
-│   │   └── school.py           # Datové modely (SchoolContact, CallResult)
+│   │   └── school.py           # Datové modely (SchoolContact, CallResult, CallSession)
 │   ├── ui/
+│   │   ├── adb_wireless_dialog.py  # Dialog pro bezdrátové připojení telefonu (QR, mDNS)
+│   │   ├── address_input_dialog.py # Dialog pro editaci adresy školy
+│   │   ├── email_dialog.py     # Dialog pro sestavení a odeslání e-mailu
 │   │   ├── main_window.py      # Hlavní okno operátora
-│   │   ├── settings_dialog.py  # Globální nastavení (Tabulka, ADB, SMS, Integrace)
-│   │   ├── theme.py            # Barevné schéma a vizuální styl SCG
+│   │   ├── settings_dialog.py  # Globální nastavení (Tabulka, ADB, SMTP, SMS)
+│   │   ├── setup_dialog.py     # Průvodce prvním spuštěním
+│   │   ├── theme.py            # Barevné schéma a vizuální styl (Dark / Light)
 │   │   └── widgets/
 │   │       ├── call_control.py # Panel ovládání hovoru (časovač, tlačítka)
 │   │       ├── result_panel.py # Panel pro zápis výsledku a tlačítko SMS

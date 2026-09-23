@@ -7,6 +7,9 @@ google-auth>=2.0.0
 google-auth-oauthlib>=1.0.0
 google-auth-httplib2>=0.2.0
 
+# HTTP requests (used for Sheets REST API cell formatting queries)
+requests>=2.31.0
+
 # Wi-Fi ADB QR Code & mDNS Discovery
 qrcode>=8.0.0
 pillow>=10.0.0

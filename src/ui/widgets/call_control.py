@@ -16,8 +16,8 @@ from ..theme import theme_manager
 
 class CallControlWidget(QWidget):
     """
-    Panel pro řízení hovoru ve stylu Linear.
-    Poskytuje přesný digitální odpočet, živou stavovou tečku a jasnou hierarchii akcí.
+    Panel pro řízení hovoru.
+    Digitální odpočet, stavová indikace a přehledná akční tlačítka.
     """
 
     call_requested = Signal()
@@ -43,7 +43,7 @@ class CallControlWidget(QWidget):
     def _setup_ui(self) -> None:
         self.setObjectName("callControlRoot")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(14)
 
         # 1. Horní řádek: Stavová tečka & Digitální časovač
@@ -58,14 +58,14 @@ class CallControlWidget(QWidget):
         self.lbl_status_dot.setObjectName("statusDot")
         status_box.addWidget(self.lbl_status_dot)
 
-        self.lbl_status_text = QLabel("Připraveno")
+        self.lbl_status_text = QLabel("Připraveno k hovoru")
         self.lbl_status_text.setObjectName("statusText")
         status_box.addWidget(self.lbl_status_text)
         status_box.addStretch()
 
         top_row.addLayout(status_box)
 
-        # Digitální časovač (monospace)
+        # Digitální časovač
         self.lbl_timer = QLabel("00:30")
         self.lbl_timer.setObjectName("timerText")
         self.lbl_timer.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -73,7 +73,7 @@ class CallControlWidget(QWidget):
 
         layout.addLayout(top_row)
 
-        # 2. Jemný tenký progress bar (3px)
+        # 2. Tenký progress bar odpočtu (4px)
         self.progress_bar = QProgressBar()
         self.progress_bar.setObjectName("callProgressBar")
         self.progress_bar.setRange(0, self.timeout_seconds)
@@ -82,31 +82,34 @@ class CallControlWidget(QWidget):
         self.progress_bar.setFixedHeight(4)
         layout.addWidget(self.progress_bar)
 
-        # 3. Akční tlačítka (Ergonomie: Primární vs Sekundární)
+        # 3. Akční tlačítka (Čisté popisky bez hranatých závorek)
         self.btn_layout = QHBoxLayout()
         self.btn_layout.setSpacing(10)
 
         # Tlačítko 1: Volat
-        self.btn_call = QPushButton("Volat  [Mezerník]")
+        self.btn_call = QPushButton("Volat")
         self.btn_call.setObjectName("btnCall")
         self.btn_call.setFixedHeight(46)
         self.btn_call.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_call.setToolTip("Zahájit hovor (klávesa Mezerník)")
         self.btn_call.clicked.connect(self._on_call_clicked)
         self.btn_layout.addWidget(self.btn_call, stretch=2)
 
         # Tlačítko 2: Spojeno
-        self.btn_connected = QPushButton("Spojeno  [Mezerník]")
+        self.btn_connected = QPushButton("Spojeno")
         self.btn_connected.setObjectName("btnConnected")
         self.btn_connected.setFixedHeight(46)
         self.btn_connected.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_connected.setToolTip("Označit jako spojeno (klávesa Mezerník)")
         self.btn_connected.clicked.connect(self._on_connected_clicked)
         self.btn_layout.addWidget(self.btn_connected, stretch=2)
 
         # Tlačítko 3: Zavěsit
-        self.btn_hangup = QPushButton("Zavěsit  [Esc]")
+        self.btn_hangup = QPushButton("Zavěsit")
         self.btn_hangup.setObjectName("btnHangup")
         self.btn_hangup.setFixedHeight(46)
         self.btn_hangup.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_hangup.setToolTip("Zavěsit / ukončit hovor (klávesa Esc)")
         self.btn_hangup.clicked.connect(self._on_hangup_clicked)
         self.btn_layout.addWidget(self.btn_hangup, stretch=2)
 
@@ -127,8 +130,7 @@ class CallControlWidget(QWidget):
                 color: {t.text_primary};
             }}
             QLabel#timerText {{
-                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-                font-size: 22px;
+                font-size: 20px;
                 font-weight: 700;
                 color: {t.text_primary};
                 background-color: {t.bg_card_secondary};
@@ -147,24 +149,24 @@ class CallControlWidget(QWidget):
             }}
             QPushButton#btnCall {{
                 background-color: {t.accent_green};
-                color: {t.bg_app if t.is_dark else '#ffffff'};
-                font-size: 14px;
+                color: #064e3b;
+                font-size: 15px;
                 font-weight: 700;
                 border-radius: 6px;
                 border: none;
             }}
             QPushButton#btnCall:hover {{
-                background-color: {'#6fe2b7' if t.is_dark else '#047857'};
+                background-color: {'#75e6bc' if t.is_dark else '#047857'};
             }}
             QPushButton#btnCall:disabled {{
                 background-color: {t.bg_card_secondary};
-                color: {t.text_dimmed};
+                color: {t.text_muted};
                 border: 1px solid {t.border_subtle};
             }}
             QPushButton#btnConnected {{
                 background-color: {t.accent_blue};
                 color: #ffffff;
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: 700;
                 border-radius: 6px;
                 border: none;
@@ -174,13 +176,13 @@ class CallControlWidget(QWidget):
             }}
             QPushButton#btnConnected:disabled {{
                 background-color: {t.bg_card_secondary};
-                color: {t.text_dimmed};
+                color: {t.text_muted};
                 border: 1px solid {t.border_subtle};
             }}
             QPushButton#btnHangup {{
                 background-color: {t.bg_card_secondary};
                 color: {t.accent_red};
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: 700;
                 border-radius: 6px;
                 border: 1px solid {t.border_subtle};
@@ -192,7 +194,7 @@ class CallControlWidget(QWidget):
             }}
             QPushButton#btnHangup:disabled {{
                 background-color: {t.bg_card_secondary};
-                color: {t.text_dimmed};
+                color: {t.text_muted};
                 border: 1px solid {t.border_subtle};
             }}
         """)
@@ -277,8 +279,7 @@ class CallControlWidget(QWidget):
         """)
         self.lbl_timer.setStyleSheet(f"""
             QLabel#timerText {{
-                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-                font-size: 22px;
+                font-size: 20px;
                 font-weight: 700;
                 color: {timer_text_color};
                 background-color: {t.bg_card_secondary};

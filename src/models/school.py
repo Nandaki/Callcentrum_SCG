@@ -14,12 +14,12 @@ class CallState(Enum):
 
 
 class CallResultType(Enum):
-    INTERESTED = "Dovoláno – Má zájem"
-    NOT_INTERESTED = "Dovoláno – Nemá zájem"
-    UNANSWERED = "Nezastiženi (Timeout / SMS)"
-    CALL_LATER = "Zavolat později"
-    WRONG_NUMBER = "Špatné / Neplatné číslo"
-    CUSTOM = "Jiné"
+    INTERESTED = "Zaujali jsme"
+    NOT_INTERESTED = "Nezájem"
+    OK_MAYBE = "Asi ok"
+    UNANSWERED = "Nedovoláno"
+    SEND_MAIL = "poslat mail"
+    CUSTOM = "??"
 
 
 @dataclass
@@ -33,6 +33,7 @@ class SchoolContact:
     project: str = ""
     previous_notes: str = ""
     status: str = "Nevoláno"
+    caller: str = ""
     row_index: int = 0
 
     @property

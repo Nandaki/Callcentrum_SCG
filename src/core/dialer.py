@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from ..config import AppConfig
 from ..models.school import SchoolContact
@@ -64,7 +64,7 @@ class PhoneController:
                             return match.group(0)
             except Exception:
                 pass
-        return "192.168.31.146"
+        return None
 
     def pair_wireless(self, ip: str, port: int | str, code: str) -> Tuple[bool, str]:
         """Spáruje telefon pomocí příkazu: adb pair <ip>:<port> <code>."""

@@ -15,9 +15,22 @@ credentials/
 !config/settings.example.json
 .env
 
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts (PyInstaller, etc.)
+build/
+dist/
+*.spec
+
 # User data & logs
 *.log
 config/settings.json
 .directory
 .DS_Store
+Thumbs.db
 

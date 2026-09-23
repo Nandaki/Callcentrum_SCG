@@ -350,10 +350,10 @@ class AdbWirelessDialog(QDialog):
 
         # IP adresa
         ip_row = QHBoxLayout()
-        default_ip = self.phone.get_kdeconnect_ip() or "192.168.31.146"
+        default_ip = self.phone.get_kdeconnect_ip() or ""
         self.txt_ip = QLineEdit(default_ip)
         self.txt_ip.setFixedHeight(38)
-        self.txt_ip.setPlaceholderText("např. 192.168.31.146")
+        self.txt_ip.setPlaceholderText("např. 192.168.1.100")
 
         btn_detect_ip = QPushButton("🔄 Zjistit z KDE")
         btn_detect_ip.setFixedHeight(38)

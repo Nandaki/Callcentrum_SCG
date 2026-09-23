@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
-from datetime import datetime
+import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
+
+import requests
 
 import gspread
 from google.auth.transport.requests import Request
@@ -159,6 +160,33 @@ class GoogleSheetsService:
         headers = [str(col).strip() for col in rows[best_row_idx] if str(col).strip()]
         return detected_row_num, headers
 
+    def get_organizer_names(self, spreadsheet_id: str) -> List[str]:
+        """Načte seznam volajících z listu Tabulka (sloupec B)."""
+        try:
+            client = self.get_client()
+            sheet = client.open_by_key(spreadsheet_id)
+            ws_tab = None
+            for ws in sheet.worksheets():
+                if ws.title.strip().lower() == "tabulka":
+                    ws_tab = ws
+                    break
+            if not ws_tab:
+                ws_tab = sheet.worksheet("Tabulka")
+
+            vals = ws_tab.col_values(2)
+            names = []
+            for val in vals:
+                s = str(val).strip()
+                if not s:
+                    continue
+                if s.lower() in ("tabulka volajících", "tabulka volajicich", "volající", "volajici", "jméno", "jmeno", "organizátor", "organizator"):
+                    continue
+                names.append(s)
+            return names or ["Honzík", "Honzík 2"]
+        except Exception as e:
+            print(f"[Sheets] Chyba při načítání organizátorů z Tabulka sloupec B: {e}")
+            return ["Honzík", "Honzík 2"]
+
     def fetch_contacts(
         self,
         spreadsheet_id: str,
@@ -166,9 +194,14 @@ class GoogleSheetsService:
         column_mapping: Dict[str, str],
         header_row: int = 11,
         only_uncalled: bool = True,
+        operator_name: str = "",
     ) -> List[SchoolContact]:
         """
         Stáhne řádky tabulky začínající za řádkem záhlaví (header_row + 1).
+        Filtruje:
+        - Zelená pole (školy označené zelenou barvou pozadí nesmí být volány!)
+        - Již zavolané školy (checkbox v sloupci Zavoláno/Zav je zaškrtnutý nebo má status)
+        - POUZE školy, které má přihlášený volající zapsané na sebe ve sloupci A (Volá)
         """
         client = self.get_client()
         sheet = client.open_by_key(spreadsheet_id)
@@ -184,12 +217,42 @@ class GoogleSheetsService:
             if col_name:
                 col_indices[col_name] = idx
 
-        contacts: List[SchoolContact] = []
+        # Detekce zelených polí přes REST API (zkontroluje sloupce A:B)
+        is_green_row: Dict[int, bool] = {}
+        try:
+            creds = self._get_saved_credentials()
+            if creds and creds.valid:
+                headers = {"Authorization": f"Bearer {creds.token}"}
+                safe_range = urllib.parse.quote(f"'{worksheet_name}'!A{header_row}:B")
+                url = (
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
+                    f"?ranges={safe_range}"
+                    "&fields=sheets.data.rowData.values.effectiveFormat.backgroundColor"
+                )
+                resp = requests.get(url, headers=headers, timeout=12)
+                if resp.status_code == 200:
+                    raw_rows = resp.json().get("sheets", [{}])[0].get("data", [{}])[0].get("rowData", [])
+                    for offset, r in enumerate(raw_rows):
+                        row_idx = header_row + offset
+                        cells = r.get("values", [])
+                        for c in cells:
+                            bg = c.get("effectiveFormat", {}).get("backgroundColor", {})
+                            if bg.get("green", 0) > 0.7 and bg.get("red", 0) < 0.5:
+                                is_green_row[row_idx] = True
+                                break
+        except Exception as e:
+            print(f"[Sheets] Varování při kontrole zelených polí: {e}")
 
-        # Datové řádky začínají na header_row + 1 (1-indexed)
+        contacts: List[SchoolContact] = []
+        op_clean = operator_name.strip().lower() if operator_name else ""
+
         for row_offset, row in enumerate(all_values[header_row:], start=header_row + 1):
-            def get_val(field_key: str) -> str:
-                mapped_col_name = column_mapping.get(field_key)
+            # 1. Kontrola zeleného pole
+            if is_green_row.get(row_offset, False):
+                continue
+
+            def get_val(field_key: str, default_col: str = "") -> str:
+                mapped_col_name = column_mapping.get(field_key) or default_col
                 if not mapped_col_name:
                     return ""
                 col_idx = col_indices.get(mapped_col_name)
@@ -197,34 +260,50 @@ class GoogleSheetsService:
                     return str(row[col_idx]).strip()
                 return ""
 
-            name = get_val("name")
-            phone = get_val("phone")
-
+            name = get_val("name", "nazev")
+            phone = get_val("phone", "telefon_skoly")
             if not name and not phone:
                 continue
 
-            status = get_val("status")
+            # 2. Kontrola zaškrtávacího políčka 'Zavoláno' / 'Zav' (Sloupec B)
+            val_called = get_val("called", "Zavoláno") or get_val("called", "Zav")
+            if not val_called and 1 < len(row):
+                val_called = str(row[1]).strip()
 
-            # Kontrola zda již bylo voláno (buď podle sloupce status nebo sloupce Zavoláno)
-            zavolano_idx = col_indices.get("Zavoláno")
-            is_already_called = False
-            if zavolano_idx is not None and zavolano_idx < len(row):
-                val_zavolano = str(row[zavolano_idx]).upper()
-                if val_zavolano in ("TRUE", "ANO", "1"):
-                    is_already_called = True
+            if val_called.upper() in ("TRUE", "1", "ANO", "CHECKED"):
+                continue
 
-            if only_uncalled and (is_already_called or (status and status not in ("Nevoláno", "Nevyřízeno", ""))):
+            # 3. Kontrola organizátora / volajícího ve sloupci 'Volá' (Sloupec A)
+            # Uživatel požaduje mít v aplikaci POUZE školy zapsané na sebe ve sloupci A!
+            val_caller = get_val("caller", "Volá")
+            if not val_caller and 0 < len(row):
+                val_caller = str(row[0]).strip()
+
+            if not val_caller:
+                continue
+
+            if not op_clean or val_caller.lower() != op_clean:
+                continue
+
+            # 4. Kontrola statusu (Sloupec C)
+            status = get_val("status", "Stav")
+            if not status and 2 < len(row):
+                status = str(row[2]).strip()
+
+            resolved_statuses = ("Zaujali jsme", "Nezájem", "Asi ok", "Nedovoláno", "poslat mail")
+            if only_uncalled and status in resolved_statuses:
                 continue
 
             contact = SchoolContact(
                 id=row_offset,
                 name=name or "Neznámá škola",
-                city=get_val("city"),
-                contact_person=get_val("contact_person"),
+                city=get_val("city", "mesto"),
+                contact_person=get_val("contact_person", "kontakt_jmeno"),
                 phone=phone,
-                email=get_val("email"),
-                previous_notes=get_val("previous_notes"),
+                email=get_val("email", "email_skoly"),
+                previous_notes=get_val("previous_notes", "projekty_5let"),
                 status=status or "Nevoláno",
+                caller=val_caller,
                 row_index=row_offset,
             )
             contacts.append(contact)
@@ -239,8 +318,9 @@ class GoogleSheetsService:
         column_mapping: Dict[str, str],
         result: CallResult,
         header_row: int = 11,
+        operator_name: str = "",
     ) -> None:
-        """Zapíše výsledek hovoru, poznámku a čas do příslušných buněk v daném řádku."""
+        """Zapíše výsledek hovoru, zaškrtne checkbox, nastaví organizátora a poznámku."""
         client = self.get_client()
         sheet = client.open_by_key(spreadsheet_id)
         worksheet = sheet.worksheet(worksheet_name)
@@ -250,43 +330,86 @@ class GoogleSheetsService:
 
         updates = []
 
-        # 1. Stav hovoru
-        status_col = column_mapping.get("status") or "Stav"
-        if status_col and status_col in col_indices:
-            col_num = col_indices[status_col]
+        # 1. Sloupec A ('Volá') - zapíšeme jméno operátora
+        caller_col_name = column_mapping.get("caller") or "Volá"
+        col_num_a = col_indices.get(caller_col_name, 1)
+        if operator_name:
             updates.append({
-                "range": gspread.utils.rowcol_to_a1(row_index, col_num),
-                "values": [[result.result_type.value]],
+                "range": gspread.utils.rowcol_to_a1(row_index, col_num_a),
+                "values": [[operator_name]],
             })
 
-        # 2. Nastavení checkboxu 'Zavoláno' na TRUE (pokud sloupec existuje)
-        if "Zavoláno" in col_indices:
-            col_num = col_indices["Zavoláno"]
-            updates.append({
-                "range": gspread.utils.rowcol_to_a1(row_index, col_num),
-                "values": [["TRUE"]],
-            })
+        # 2. Sloupec B ('Zavoláno' / 'Zav') - zaškrtneme checkbox (TRUE)
+        called_col_name = column_mapping.get("called") or "Zavoláno"
+        col_num_b = col_indices.get(called_col_name, col_indices.get("Zav", 2))
+        updates.append({
+            "range": gspread.utils.rowcol_to_a1(row_index, col_num_b),
+            "values": [[True]],
+        })
 
-        # 3. Operátorská poznámka
-        note_col = column_mapping.get("operator_note") or column_mapping.get("previous_notes") or "Poznámky"
-        if note_col and note_col in col_indices and result.note:
-            col_num = col_indices[note_col]
+        # 3. Sloupec C ('Stav') - zapíšeme výsledek (Zaujali jsme / Nezájem / Asi ok / Nedovoláno / poslat mail)
+        status_col_name = column_mapping.get("status") or "Stav"
+        col_num_c = col_indices.get(status_col_name, 3)
+        updates.append({
+            "range": gspread.utils.rowcol_to_a1(row_index, col_num_c),
+            "values": [[result.result_type.value]],
+        })
+
+        # 4. Sloupec D ('Poznámky') - operátorská poznámka
+        note_col_name = column_mapping.get("operator_note") or "Poznámky"
+        col_num_d = col_indices.get(note_col_name, 4)
+        if result.note:
             updates.append({
-                "range": gspread.utils.rowcol_to_a1(row_index, col_num),
+                "range": gspread.utils.rowcol_to_a1(row_index, col_num_d),
                 "values": [[result.note]],
             })
 
-        # 4. Čas volání
+        # 5. Čas volání (pokud je namapován)
         time_col = column_mapping.get("timestamp")
         if time_col and time_col in col_indices:
-            col_num = col_indices[time_col]
+            col_num_t = col_indices[time_col]
             formatted_time = result.timestamp.strftime("%d.%m.%Y %H:%M")
             updates.append({
-                "range": gspread.utils.rowcol_to_a1(row_index, col_num),
+                "range": gspread.utils.rowcol_to_a1(row_index, col_num_t),
                 "values": [[formatted_time]],
             })
 
         if updates:
-            worksheet.batch_update(updates)
-            print(f"[Sheets] Úspěšně zapsán výsledek do řádku {row_index}.")
+            worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+            print(f"[Sheets] Úspěšně zapsán výsledek do řádku {row_index}: Volá={operator_name}, Zav=TRUE, Stav={result.result_type.value}")
+
+    def update_school_email(
+        self,
+        spreadsheet_id: str,
+        worksheet_name: str,
+        row_index: int,
+        new_email: str,
+        column_mapping: Dict[str, str],
+        header_row: int = 11,
+    ) -> bool:
+        """Zapíše novou e-mailovou adresu do odpovídajícího sloupce (např. email_skoly) v daném řádku."""
+        client = self.get_client()
+        sheet = client.open_by_key(spreadsheet_id)
+        worksheet = sheet.worksheet(worksheet_name)
+
+        header = [str(c).strip() for c in worksheet.row_values(header_row)]
+        col_indices: Dict[str, int] = {name: idx + 1 for idx, name in enumerate(header) if name}
+
+        email_col_name = column_mapping.get("email") or "email_skoly"
+        col_num = col_indices.get(email_col_name)
+        if not col_num:
+            for name, idx in col_indices.items():
+                if "email" in name.lower() or "e-mail" in name.lower():
+                    col_num = idx
+                    break
+
+        if not col_num:
+            print(f"[Sheets] Sloupec pro e-mail '{email_col_name}' nebyl v záhlaví nalezen.")
+            return False
+
+        cell_a1 = gspread.utils.rowcol_to_a1(row_index, col_num)
+        worksheet.update([[new_email]], cell_a1, value_input_option="USER_ENTERED")
+        print(f"[Sheets] Úspěšně aktualizován e-mail v řádku {row_index} ({cell_a1}): {new_email}")
+        return True
+
 
